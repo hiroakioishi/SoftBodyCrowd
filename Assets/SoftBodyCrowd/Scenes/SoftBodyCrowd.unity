@@ -172,7 +172,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 02ad25d7245b4c6459dfbf435b3692b1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _maxObjectNum: 256
+  _maxObjectNum: 512
   _cohesionNeighborhoodRadius: 2
   _alignmentNeighborhoodRadius: 2
   _separateNeighborhoodRadius: 1
@@ -183,7 +183,7 @@ MonoBehaviour:
   _separateWeight: 3
   _avoidWallWeight: 10
   _simulationAreaCenter: {x: 0, y: 0, z: 0}
-  _simulationAreaSize: {x: 16, y: 12, z: 16}
+  _simulationAreaSize: {x: 20, y: 12, z: 20}
   _boidsCS: {fileID: 7200000, guid: f10badf51a0feb64d9681d018323b059, type: 3}
   _boidsResetVelocityCS: {fileID: 7200000, guid: 910d9afba0576c94c9c78c6e2c4af69a,
     type: 3}
@@ -312,7 +312,7 @@ Camera:
     height: 1
   near clip plane: 0.3
   far clip plane: 1000
-  field of view: 60
+  field of view: 30
   orthographic: 0
   orthographic size: 5
   m_Depth: -1
@@ -337,7 +337,7 @@ Transform:
   m_PrefabInternal: {fileID: 0}
   m_GameObject: {fileID: 1797916039}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1, z: -10}
+  m_LocalPosition: {x: 0, y: 0, z: -16}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 0}
