@@ -1,0 +1,171 @@
+﻿#pragma kernel ForceCS
+#pragma kernel IntegrateCS
+
+struct BoidData
+{
+	float3 velocity;
+	float3 position;
+};
+
+#define SIMULATION_BLOCK_SIZE 256
+
+StructuredBuffer<BoidData>   _BoidDataBufferRO;
+RWStructuredBuffer<BoidData> _BoidDataBuffer;
+StructuredBuffer<float3>     _BoidForceBufferRO;
+RWStructuredBuffer<float3>   _BoidForceBuffer;
+
+int _MaxBoidObjectNum;
+
+float _DeltaTime;
+
+float _SeparateNeighborhoodRadius; 
+float _AlignmentNeighborhoodRadius;
+float _CohesionNeighborhoodRadius; 
+
+float _MaxSpeed;
+float _MaxSteerForce;
+
+float _SeparateWeight;
+float _AlignmentWeight;
+float _CohesionWeight;
+
+float4 _WallCenter;
+float4 _WallSize;
+float  _AvoidWallWeight;
+
+float3 limit(float3 vec, float max)
+{
+	float length = sqrt(dot(vec, vec));
+	return (length > max && length > 0) ? vec.xyz * (max / length) : vec.xyz;
+}
+
+float3 avoidWall(float3 position)
+{
+	float3 wc = _WallCenter.xyz;
+	float3 ws = _WallSize.xyz;
+	float3 acc = float3(0, 0, 0);
+	acc.x = (position.x < wc.x - ws.x * 0.5) ? acc.x + 1.0 : acc.x;
+	acc.x = (position.x > wc.x + ws.x * 0.5) ? acc.x - 1.0 : acc.x;
+	acc.y = (position.y < wc.y - ws.y * 0.5) ? acc.y + 1.0 : acc.y;
+	acc.y = (position.y > wc.y + ws.y * 0.5) ? acc.y - 1.0 : acc.y;
+	acc.z = (position.z < wc.z - ws.z * 0.5) ? acc.z + 1.0 : acc.z;
+	acc.z = (position.z > wc.z + ws.z * 0.5) ? acc.z - 1.0 : acc.z;
+	return acc;
+}
+
+groupshared BoidData boid_data[SIMULATION_BLOCK_SIZE];
+
+[numthreads(SIMULATION_BLOCK_SIZE, 1, 1)]
+void ForceCS
+(
+	uint3 DTid : SV_DispatchThreadID,
+	uint3 Gid : SV_GroupID,
+	uint3 GTid : SV_GroupThreadID,
+	uint  GI : SV_GroupIndex
+)
+{
+	const unsigned int P_ID = DTid.x;
+	float3 P_position = _BoidDataBufferRO[P_ID].position;
+	float3 P_velocity = _BoidDataBufferRO[P_ID].velocity;
+
+	float3 force = float3(0, 0, 0);
+
+	float3 sepPosSum = float3(0, 0, 0);
+	int sepCount = 0;
+
+	float3 aliVelSum = float3(0, 0, 0);
+	int aliCount = 0;
+
+	float3 cohPosSum = float3(0, 0, 0);
+	int cohCount = 0;
+
+	[loop]
+	for (uint N_block_ID = 0; N_block_ID < (uint)_MaxBoidObjectNum; N_block_ID += SIMULATION_BLOCK_SIZE)
+	{
+		boid_data[GI] = _BoidDataBufferRO[N_block_ID + GI];
+
+		GroupMemoryBarrierWithGroupSync();
+		for (int N_tile_ID = 0; N_tile_ID < SIMULATION_BLOCK_SIZE; N_tile_ID++)
+		{
+			float3 N_position = boid_data[N_tile_ID].position;
+			float3 N_velocity = boid_data[N_tile_ID].velocity;
+
+			float3 diff = P_position - N_position;
+			float  dist = sqrt(dot(diff, diff));
+
+			if (dist > 0.0 && dist <= _SeparateNeighborhoodRadius)
+			{
+				float3 repulse = normalize(P_position - N_position);
+				repulse /= dist;
+				sepPosSum += repulse;
+				sepCount++;
+			}
+
+			if (dist > 0.0 && dist <= _AlignmentNeighborhoodRadius)
+			{
+				aliVelSum += N_velocity;
+				aliCount++;
+			}
+
+			if (dist > 0.0 && dist <= _CohesionNeighborhoodRadius)
+			{
+				cohPosSum += N_position;
+				cohCount++; 
+			}
+		}
+		GroupMemoryBarrierWithGroupSync();
+	}
+
+	float3 sepSteer = (float3)0.0;
+	if (sepCount > 0)
+	{
+		sepSteer = sepPosSum / (float)sepCount;
+		sepSteer = normalize(sepSteer) * _MaxSpeed;
+		sepSteer = sepSteer - P_velocity;
+		sepSteer = limit(sepSteer, _MaxSteerForce);
+	}
+
+	float3 aliSteer = (float3)0.0;
+	if (aliCount > 0)
+	{
+		aliSteer = aliVelSum / (float)aliCount;
+		aliSteer = normalize(aliSteer) * _MaxSpeed;
+		aliSteer = aliSteer - P_velocity;
+		aliSteer = limit(aliSteer, _MaxSteerForce);
+	}
+	
+	float3 cohSteer = (float3)0.0;
+	if (cohCount > 0)
+	{
+		cohPosSum = cohPosSum / (float)cohCount;
+		cohSteer = cohPosSum - P_position;
+		cohSteer = normalize(cohSteer) * _MaxSpeed;
+		cohSteer = cohSteer - P_velocity;
+		cohSteer = limit(cohSteer, _MaxSteerForce);
+	}
+	force += aliSteer * _AlignmentWeight;
+	force += cohSteer * _CohesionWeight;
+	force += sepSteer * _SeparateWeight;
+
+	_BoidForceBuffer[P_ID] = force;
+}
+
+[numthreads(SIMULATION_BLOCK_SIZE, 1, 1)]
+void IntegrateCS
+(
+	uint3 DTid : SV_DispatchThreadID
+)
+{
+	const unsigned int P_ID = DTid.x; 
+
+	BoidData b = _BoidDataBuffer[P_ID];
+	float3 force = _BoidForceBufferRO[P_ID];
+
+	force += avoidWall(b.position) * _AvoidWallWeight;
+
+	b.velocity += force * _DeltaTime;
+	b.velocity = limit(b.velocity, _MaxSpeed);
+	b.position += b.velocity * _DeltaTime;
+
+	_BoidDataBuffer[P_ID] = b;
+}
